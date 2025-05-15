@@ -1,0 +1,131 @@
+name,description,query,id,parentId,isFolder
+Set parameters to access input files,,":param {
+  employee_skills_csv: ""https://storage.googleapis.com/civilaircraft/knowledge/employee_skills.csv"",
+  employees_csv: ""https://storage.googleapis.com/civilaircraft/knowledge/employees.csv"",
+  project_participation_csv: ""https://storage.googleapis.com/civilaircraft/knowledge/project_participation.csv"",
+  projects_csv: ""https://storage.googleapis.com/civilaircraft/knowledge/projects.csv"",
+  skill_recommendations_csv: ""https://storage.googleapis.com/civilaircraft/knowledge/skill_recommendations.csv"",
+  project_required_skills_csv: ""https://storage.googleapis.com/civilaircraft/knowledge/project_required_skills.csv""
+}",0,1,false
+knowledge management,,,1,2,true
+Load data,,"// Loading Employees
+LOAD CSV WITH HEADERS FROM $employees_csv AS row
+CREATE (:Employee {firstName: row.FirstName, lastName: row.LastName, email: row.Email, experience: toInteger(row.Experience)});
+
+// Loading Employee Skills
+LOAD CSV WITH HEADERS FROM $employee_skills_csv AS row
+MATCH (e:Employee {email: row.Email})
+MERGE (s:Skill {name: row.Skill})
+MERGE (e)-[:HAS_SKILL {level: row.Level}]->(s);
+
+// Loading Projects
+LOAD CSV WITH HEADERS FROM $projects_csv AS row
+CREATE (:Project {name: row.ProjectName, startDate: date(row.StartDate), endDate: date(row.EndDate), requiredSkills: split(row.RequiredSkills, ','), success: row.Success = 'True'});
+
+// Loading Project Participation
+LOAD CSV WITH HEADERS FROM $project_participation_csv AS row
+MATCH (e:Employee {email: row.Email}), (p:Project {name: row.ProjectName})
+CREATE (e)-[:WORKED_ON]->(p);
+
+// Loading Project Required Skills
+LOAD CSV WITH HEADERS FROM $project_required_skills_csv AS row
+MATCH (p:Project {name: row.ProjectName}), (s:Skill {name: row.Skill})
+CREATE (p)-[:REQUIRES]->(s);
+
+// Loading Skill Recommendations
+LOAD CSV WITH HEADERS FROM $skill_recommendations_csv AS row
+MATCH (recommender:Employee {email: row.RecommenderEmail}), (recommendee:Employee {email: row.RecommendeeEmail}), (s:Skill {name: row.Skill})
+CREATE (recommender)-[:RECOMMENDS_SKILL {skill: s.name}]->(recommendee);
+",3,1,false
+Have we modeled skill reco properly?,,"MATCH (e1)-[r:RECOMMENDS_SKILL]->(e2) 
+RETURN e1.email, e2.email, r.skill LIMIT 25;",4,1,false
+Refactor skill recommendations,,"// Refactor skill recommendations
+MATCH (e1)-[r:RECOMMENDS_SKILL]->(e2) 
+MATCH (s:Skill) WHERE s.name = r.skill
+MERGE (reco:Recommendation {id: randomUUID()})
+MERGE (e1)-[:PERFORMS]->(reco)
+MERGE (reco)-[:ON]->(e2)
+MERGE (reco)-[:FOR]->(s);",5,1,false
+1. Identifying Knowledge Gaps in Projects,,"// 1. Identifying Knowledge Gaps in Projects
+MATCH (p:Project)-[:REQUIRES]->(s:Skill)
+WITH p, collect(s.name) AS requiredSkills
+MATCH (p)<-[:WORKED_ON]-(e:Employee)-[:HAS_SKILL]->(s)
+WITH p, requiredSkills, collect(DISTINCT s.name) AS coveredSkills
+WITH p, [skill IN requiredSkills WHERE NOT skill IN coveredSkills] AS missingSkills
+WHERE missingSkills <> []
+RETURN p.name AS Project, missingSkills;
+",6,1,false
+2. Analyzing Project Success Based on Skill Coverage,,"// 2. Analyzing Project Success Based on Skill Coverage
+MATCH (p:Project)
+OPTIONAL MATCH (p)-[:REQUIRES]->(s:Skill)
+WITH p, collect(s.name) AS requiredSkills
+MATCH (p)<-[:WORKED_ON]-(e:Employee)-[:HAS_SKILL]->(s)
+WITH p, requiredSkills, collect(s.name) AS coveredSkills
+RETURN p.name, requiredSkills, coveredSkills, size(coveredSkills) >= size(requiredSkills) AS FullyCovered
+",7,1,false
+3. Analyzing Project Success Based on Skill Coverage,,"// 3. Analyzing Project Success Based on Skill Coverage
+MATCH (p:Project)
+OPTIONAL MATCH (p)-[:REQUIRES]->(s:Skill)
+WITH p, collect(s.name) AS requiredSkills
+MATCH (p)<-[:WORKED_ON]-(e:Employee)-[:HAS_SKILL]->(s)
+WHERE toInteger(e.experience) >= 15
+WITH p, requiredSkills, collect(s.name) AS coveredSkills
+RETURN p.name, requiredSkills, coveredSkills, size(coveredSkills) >= size(requiredSkills) AS FullyCovered
+",8,1,false
+"4. Analyzing Project Success Based on Skill Coverage, experience and recommendations",,"// 4. Analyzing Project Success Based on Skill Coverage, experience and recommendations
+MATCH (p:Project)
+OPTIONAL MATCH (p)-[:REQUIRES]->(s:Skill)
+WITH p, collect(s.name) AS requiredSkills
+MATCH (p)<-[:WORKED_ON]-(e:Employee)-[:HAS_SKILL]->(s)
+MATCH (other:Employee)-[:PERFORMS]->(reco:Recommendation)-[:ON]->(e)
+MATCH (reco)-[:FOR]->(s)
+WHERE toInteger(e.experience) >= 15
+WITH p, requiredSkills, collect(s.name) AS coveredSkills
+RETURN p.name, requiredSkills, coveredSkills, size(coveredSkills) >= size(requiredSkills) AS FullyCovered
+",9,1,false
+Graph Data Science,,,10,1,true
+Step 1: Projecting the Employee-Skill Graph,,"// Step 1: Projecting the Employee-Skill Graph
+CALL gds.graph.project(
+  'employee_skill_graph',
+  ['Employee', 'Skill'],
+  {
+    HAS_SKILL: {
+      type: 'HAS_SKILL'
+    }
+  }
+);
+",11,10,false
+Step 2: Calculating Employee Skill Similarity (Jaccard Similarity),,"// Step 2: Calculating Employee Skill Similarity (Jaccard Similarity)
+CALL gds.nodeSimilarity.stream('employee_skill_graph', {
+  relationshipTypes: ['HAS_SKILL'],
+  similarityCutoff: 0.1
+})
+YIELD node1, node2, similarity
+RETURN gds.util.asNode(node1).email AS Employee1, 
+       gds.util.asNode(node2).email AS Employee2, 
+       similarity
+ORDER BY similarity DESC
+LIMIT 100;
+",12,10,false
+Step 2bis: Calculating Employee Skill Similarity (Jaccard Similarity),,"// Step 2bis: Calculating Employee Skill Similarity (Jaccard Similarity)
+CALL gds.nodeSimilarity.mutate('employee_skill_graph', {
+  relationshipTypes: ['HAS_SKILL'],
+  mutateRelationshipType: 'SIMILAR_SKILL',
+  similarityCutoff: 0.1,
+  mutateProperty: 'similarity'
+})
+YIELD nodesCompared, relationshipsWritten;",13,10,false
+Step 3: Running Community Detection (Louvain),,"// Step 3: Running Community Detection (Louvain)
+CALL gds.louvain.write('employee_skill_graph', {
+  nodeLabels: ['Employee'],
+  relationshipTypes: ['SIMILAR_SKILL'],
+  writeProperty: 'community',
+  relationshipWeightProperty: 'similarity'
+})
+YIELD communityCount, modularity
+RETURN communityCount, modularity;
+",14,10,false
+Step 4: Computing community sizes,,"// Step 4: Computing community sizes
+MATCH (e:Employee)
+RETURN e.community AS community, count(e) AS communitySize, collect(e.email) AS members
+ORDER BY communitySize DESC;",15,10,false
