@@ -129,3 +129,11 @@ Step 4: Computing community sizes,,"// Step 4: Computing community sizes
 MATCH (e:Employee)
 RETURN e.community AS community, count(e) AS communitySize, collect(e.email) AS members
 ORDER BY communitySize DESC;",15,10,false
+Step 5 - Write back SIMILAR_SKILL relationships,,"// Step 5 - Write back SIMILAR_SKILL relationships
+CALL gds.graph.relationship.write(
+  'employee_skill_graph',
+  'SIMILAR_SKILL',
+  'similarity'
+)
+YIELD
+  graphName, relationshipType, relationshipProperty, relationshipsWritten, propertiesWritten;",16,10,false
