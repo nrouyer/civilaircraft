@@ -8,6 +8,9 @@ This document provides an overview of three comprehensive use cases developed us
 2. **Obsolescence Management System:** Manages and mitigates obsolescence risks in products and components.
 3. **Component Shortage Management System:** Tracks and mitigates risks associated with component shortages in products.
 
+![Sample Graph for Knowledge Management](./civilaircraft_knowledge_management.png)
+
+
 ## Why Neo4j?
 
 Neo4j is a leading graph database platform that excels at uncovering connections between data points, making it ideal for complex scenarios like knowledge management, obsolescence management, and component shortage management. It enables:
