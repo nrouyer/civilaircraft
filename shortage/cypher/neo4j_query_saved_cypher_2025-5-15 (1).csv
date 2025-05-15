@@ -1,0 +1,52 @@
+name,description,query,id,parentId,isFolder
+component shortage management,,,0,1,true
+1. Create Aircraft nodes,,"// 1. Create Aircraft nodes
+UNWIND ['A320', 'A330', 'A350'] AS aircraft
+CREATE (:Aircraft {name: aircraft});",2,0,false
+2. Create Sub-Assemblies and Link to Aircraft,,"// 2. Create Sub-Assemblies and Link to Aircraft
+UNWIND [
+  ['A320', 'A320-Wing'], ['A320', 'A320-Fuselage'],
+  ['A330', 'A330-Wing'], ['A330', 'A330-Fuselage'],
+  ['A350', 'A350-Wing'], ['A350', 'A350-Fuselage']
+] AS pair
+MATCH (a:Aircraft {name: pair[0]})
+CREATE (a)-[:HAS_SUB_ASSEMBLY]->(:SubAssembly {name: pair[1], aircraft: pair[0]});",3,0,false
+3. Create Components and Link to Sub-Assemblies,,"// 3. Create Components and Link to Sub-Assemblies
+UNWIND [
+  ['A320-Wing', 'Wing Panel'], ['A320-Wing', 'Rivet'], ['A320-Wing', 'Fastener'], ['A320-Fuselage', 'Engine'], ['A320-Fuselage', 'Control System'],
+  ['A330-Wing', 'Wing Panel'], ['A330-Wing', 'Rivet'], ['A330-Wing', 'Fastener'], ['A330-Fuselage', 'Engine'], ['A330-Fuselage', 'Hydraulic System'],
+  ['A350-Wing', 'Wing Panel'], ['A350-Wing', 'Rivet'], ['A350-Wing', 'Fastener'], ['A350-Fuselage', 'Engine'], ['A350-Fuselage', 'Electrical Wiring']
+] AS pair
+MATCH (s:SubAssembly {name: pair[0]})
+CREATE (s)-[:HAS_COMPONENT]->(:Component {name: pair[1], shared: pair[1] IN ['Rivet', 'Fastener', 'Engine']});",4,0,false
+4. Create Supplier Nodes and Link to Components,,"// 4. Create Supplier Nodes and Link to Components
+UNWIND [
+  ['Wing Panel', 'Supplier A'], ['Rivet', 'Supplier A'], ['Rivet', 'Supplier B'], ['Fastener', 'Supplier A'], ['Fastener', 'Supplier B'],
+  ['Engine', 'Supplier A'], ['Engine', 'Supplier C'], ['Control System', 'Supplier C'], ['Hydraulic System', 'Supplier B'], ['Electrical Wiring', 'Supplier D']
+] AS pair
+MATCH (c:Component {name: pair[0]})
+CREATE (c)-[:SUPPLIED_BY]->(:Supplier {name: pair[1]});",5,0,false
+1. Identify Components with Single Supplier (High Risk),,"// 1. Identify Components with Single Supplier (High Risk)
+MATCH (c:Component)
+WITH c, count { (c)-[:SUPPLIED_BY]->() } AS supplier_count
+WHERE supplier_count = 1
+RETURN c.name;",6,0,false
+2. Find All Alternative Suppliers for a Component,,"// 2. Find All Alternative Suppliers for a Component
+MATCH (c:Component)-[:SUPPLIED_BY]->(s:Supplier)
+WHERE c.name = ""Engine""
+RETURN distinct s.name;",7,0,false
+3. List All Shared Components Across Multiple Aircrafts,,"// 3. List All Shared Components Across Multiple Aircrafts
+MATCH (c:Component)
+WHERE c.shared = true
+RETURN distinct c.name;",8,0,false
+4. Calculate Supplier Distribution for Each Component,,"// 4. Calculate Supplier Distribution for Each Component 
+MATCH (c:Component)-[:SUPPLIED_BY]->(s:Supplier)
+RETURN c.name, collect(distinct s.name) AS suppliers;",9,0,false
+5. Identify Critical Sub-Assemblies with Highest Number of Unique Components,,"// 5. Identify Critical Sub-Assemblies with Highest Number of Unique Components
+MATCH (s:SubAssembly)-[:HAS_COMPONENT]->(c:Component)
+RETURN s.name, count(DISTINCT c) AS unique_components
+ORDER BY unique_components DESC;",10,0,false
+6. Components without Any Supplier (Supply Chain Risk),,"// 6. Components without Any Supplier (Supply Chain Risk)
+MATCH (c:Component)
+WHERE NOT (c)-[:SUPPLIED_BY]->()
+RETURN c.name;",11,0,false

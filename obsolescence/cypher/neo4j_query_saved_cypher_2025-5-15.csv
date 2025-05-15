@@ -1,0 +1,66 @@
+name,description,query,id,parentId,isFolder
+obsolescence,,,0,1,true
+0. Bill Of Materials,,"// 0. Bill Of Materials
+MATCH p=()-[:COMPOSED_OF]->() RETURN p LIMIT 25;",2,0,false
+🚦 1. List All Obsolete Parts in the BOM,,"// 🚦 1. List All Obsolete Parts in the BOM
+MATCH (p:Part)
+WHERE p.status = 'obsolete'
+RETURN p.part_id, p.name, p.level, p.status
+ORDER BY p.level DESC;",3,0,false
+🔎 2. Traverse the BOM Hierarchy (Top-Down) and Show Obsolete Parts,,"// 🔎 2. Traverse the BOM Hierarchy (Top-Down) and Show Obsolete Parts
+MATCH (parent:Part)-[:COMPOSED_OF*..5]->(child:Part)
+WHERE child.status = 'obsolete'
+RETURN parent.part_id AS Parent, child.part_id AS ObsoletePart, child.level
+ORDER BY child.level DESC;
+",4,0,false
+🔁 3. Find Alternatives for Obsolete Parts,,"// 🔁 3. Find Alternatives for Obsolete Parts
+MATCH (obsolete:Part)-[:HAS_ALTERNATIVE]->(alt:Part)
+WHERE obsolete.status = 'obsolete'
+RETURN obsolete.part_id AS ObsoletePart, obsolete.name, 
+       alt.part_id AS AlternativePart, alt.name, alt.status;
+",5,0,false
+🌐 4. Trace All Paths to Obsolete Parts (Bottom-Up),,"// 🌐 4. Trace All Paths to Obsolete Parts (Bottom-Up)
+MATCH path = (child:Part)-[:COMPOSED_OF*..5]->(obsolete:Part)
+WHERE obsolete.status = 'obsolete'
+RETURN child.part_id AS RootPart, obsolete.part_id AS ObsoletePart,
+       nodes(path) AS FullPath, length(path) AS pathLength
+ORDER BY length(path) DESC;",6,0,false
+🔧 6. Identify Suppliers for Alternatives of Obsolete Parts,,"// 🔧 6. Identify Suppliers for Alternatives of Obsolete Parts
+MATCH (obsolete:Part)-[:HAS_ALTERNATIVE]->(alt:Part)-[:SUPPLIED_BY]->(supplier:Supplier)
+WHERE obsolete.status = 'obsolete'
+RETURN obsolete.part_id AS ObsoletePart, alt.part_id AS AlternativePart,
+       supplier.name, supplier.reliability_score;
+",7,0,false
+🌐 1. Find the Shortest Path from Any Product to an Obsolete Part,,"// Step 1: Create a Named Graph Projection (if not already done)
+CALL gds.graph.project(
+  'bom_graph',          // Graph name
+  'Part',               // Node label
+  {
+    COMPOSED_OF: {
+      type: 'COMPOSED_OF',
+      properties: 'weight' // Optional: Only if you have a weight property
+    }
+  }
+);
+
+// Step 2: Run Dijkstra's Shortest Path with Proper ID Referencing
+MATCH (product:Part {level: 0}), (obsolete:Part)
+WHERE obsolete.status = 'obsolete'
+WITH product, obsolete LIMIT 1
+CALL gds.shortestPath.dijkstra.stream('bom_graph', {
+    sourceNode: product,
+    targetNodes: [obsolete]
+})
+YIELD index, sourceNode, targetNode, totalCost, nodeIds, costs, path
+RETURN
+    index,
+    gds.util.asNode(sourceNode).name AS sourceNodeName,
+    gds.util.asNode(targetNode).name AS targetNodeName,
+    totalCost,
+    [nodeId IN nodeIds | gds.util.asNode(nodeId).name] AS nodeNames,
+    costs,
+    nodes(path) as path
+ORDER BY index;
+
+CALL gds.graph.drop('bom_graph', false);
+",8,0,false
