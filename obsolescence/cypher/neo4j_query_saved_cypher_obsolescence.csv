@@ -1,36 +1,37 @@
 name,description,query,id,parentId,isFolder
 obsolescence,,,0,1,true
+Load data,,,2,0,true
 0. Bill Of Materials,,"// 0. Bill Of Materials
-MATCH p=()-[:COMPOSED_OF]->() RETURN p LIMIT 25;",2,0,false
+MATCH p=()-[:COMPOSED_OF]->() RETURN p LIMIT 25;",3,0,false
 🚦 1. List All Obsolete Parts in the BOM,,"// 🚦 1. List All Obsolete Parts in the BOM
 MATCH (p:Part)
 WHERE p.status = 'obsolete'
 RETURN p.part_id, p.name, p.level, p.status
-ORDER BY p.level DESC;",3,0,false
+ORDER BY p.level DESC;",4,0,false
 🔎 2. Traverse the BOM Hierarchy (Top-Down) and Show Obsolete Parts,,"// 🔎 2. Traverse the BOM Hierarchy (Top-Down) and Show Obsolete Parts
 MATCH (parent:Part)-[:COMPOSED_OF*..5]->(child:Part)
 WHERE child.status = 'obsolete'
 RETURN parent.part_id AS Parent, child.part_id AS ObsoletePart, child.level
 ORDER BY child.level DESC;
-",4,0,false
+",5,0,false
 🔁 3. Find Alternatives for Obsolete Parts,,"// 🔁 3. Find Alternatives for Obsolete Parts
 MATCH (obsolete:Part)-[:HAS_ALTERNATIVE]->(alt:Part)
 WHERE obsolete.status = 'obsolete'
 RETURN obsolete.part_id AS ObsoletePart, obsolete.name, 
        alt.part_id AS AlternativePart, alt.name, alt.status;
-",5,0,false
+",6,0,false
 🌐 4. Trace All Paths to Obsolete Parts (Bottom-Up),,"// 🌐 4. Trace All Paths to Obsolete Parts (Bottom-Up)
 MATCH path = (child:Part)-[:COMPOSED_OF*..5]->(obsolete:Part)
 WHERE obsolete.status = 'obsolete'
 RETURN child.part_id AS RootPart, obsolete.part_id AS ObsoletePart,
        nodes(path) AS FullPath, length(path) AS pathLength
-ORDER BY length(path) DESC;",6,0,false
+ORDER BY length(path) DESC;",7,0,false
 🔧 6. Identify Suppliers for Alternatives of Obsolete Parts,,"// 🔧 6. Identify Suppliers for Alternatives of Obsolete Parts
 MATCH (obsolete:Part)-[:HAS_ALTERNATIVE]->(alt:Part)-[:SUPPLIED_BY]->(supplier:Supplier)
 WHERE obsolete.status = 'obsolete'
 RETURN obsolete.part_id AS ObsoletePart, alt.part_id AS AlternativePart,
        supplier.name, supplier.reliability_score;
-",7,0,false
+",8,0,false
 🌐 1. Find the Shortest Path from Any Product to an Obsolete Part,,"// Step 1: Create a Named Graph Projection (if not already done)
 CALL gds.graph.project(
   'bom_graph',          // Graph name
@@ -63,4 +64,76 @@ RETURN
 ORDER BY index;
 
 CALL gds.graph.drop('bom_graph', false);
-",8,0,false
+",9,0,false
+Set parameters,,":param {
+alternatives_csv: ""https://storage.googleapis.com/civilaircraft/obsolescence/alternatives.csv"",
+datasources_csv: ""https://storage.googleapis.com/civilaircraft/obsolescence/datasources.csv"",
+manufacturers_csv: ""https://storage.googleapis.com/civilaircraft/obsolescence/manufacturers.csv"",
+part_datasource_csv: ""https://storage.googleapis.com/civilaircraft/obsolescence/part_datasource.csv"",
+part_manufacturer_csv: ""https://storage.googleapis.com/civilaircraft/obsolescence/part_manufacturer.csv"",
+part_relationships_csv: ""https://storage.googleapis.com/civilaircraft/obsolescence/part_relationships.csv"",
+part_supplier_csv: ""https://storage.googleapis.com/civilaircraft/obsolescence/part_supplier.csv"",
+parts_csv: ""https://storage.googleapis.com/civilaircraft/obsolescence/parts.csv"",
+suppliers_csv: ""https://storage.googleapis.com/civilaircraft/obsolescence/suppliers.csv""
+}
+",10,2,false
+Load nodes and relationships,,"// Step 1: Load Part nodes
+LOAD CSV WITH HEADERS FROM $parts_csv AS row
+MERGE (p:Part {part_id: row.part_id})
+SET p.name = row.name,
+p.level = toInteger(row.level),
+p.status = row.status;
+
+// Step 2: Load COMPOSED_OF and HAS_ALTERNATIVE relationships
+LOAD CSV WITH HEADERS FROM $part_relationships_csv AS row
+MATCH (parent:Part {part_id: row.parent_id}), (child:Part {part_id: row.child_id})
+CALL (parent, child, row) {
+WITH parent, child, row
+WITH parent, child
+WHERE row.type = 'COMPOSED_OF'
+MERGE (parent)-[:COMPOSED_OF]->(child)
+RETURN 1 AS result
+UNION
+WITH parent, child
+WHERE row.type = 'HAS_ALTERNATIVE'
+MERGE (parent)-[:HAS_ALTERNATIVE]->(child)
+RETURN 1 AS result
+}
+RETURN count(*);
+
+// Step 3: Load Manufacturer nodes
+LOAD CSV WITH HEADERS FROM $manufacturers_csv AS row
+MERGE (m:Manufacturer {manufacturer_id: row.manufacturer_id})
+SET m.name = row.name,
+m.region = row.region;
+
+// Step 4: Load Supplier nodes
+LOAD CSV WITH HEADERS FROM $suppliers_csv AS row
+MERGE (s:Supplier {supplier_id: row.supplier_id})
+SET s.name = row.name,
+s.location = row.location,
+s.reliability_score = toFloat(row.reliability_score);
+
+// Step 5: Load DataSource nodes
+LOAD CSV WITH HEADERS FROM $datasources_csv AS row
+MERGE (d:DataSource {source_id: row.source_id})
+SET d.type = row.type,
+d.last_updated = date(row.last_updated);
+
+// Step 6: Link Part to Manufacturer
+LOAD CSV WITH HEADERS FROM $part_manufacturer_csv AS row
+MATCH (p:Part {part_id: row.part_id})
+MATCH (m:Manufacturer {manufacturer_id: row.manufacturer_id})
+MERGE (p)-[:MANUFACTURED_BY]->(m);
+
+// Step 7: Link Part to Supplier
+LOAD CSV WITH HEADERS FROM $part_supplier_csv AS row
+MATCH (p:Part {part_id: row.part_id})
+MATCH (s:Supplier {supplier_id: row.supplier_id})
+MERGE (p)-[:SUPPLIED_BY]->(s);
+
+// Step 8: Link Part to DataSource
+LOAD CSV WITH HEADERS FROM $part_datasource_csv AS row
+MATCH (p:Part {part_id: row.part_id})
+MATCH (d:DataSource {source_id: row.source_id})
+MERGE (p)-[:SOURCED_FROM]->(d);",11,2,false
